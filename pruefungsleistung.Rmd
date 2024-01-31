@@ -1,0 +1,16 @@
+---
+title: "pruefungsleistung"
+author: "Felix Blum"
+date: "2024-01-31"
+output: html_document
+---
+
+# Hate-Speech vorhersagen
+
+## Daten laden
+
+## Packages
+
+## EDA
+
+## tidy
