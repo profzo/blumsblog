@@ -1,0 +1,51 @@
+---
+title: "Prüfungsleistung DSii"
+author: "Felix Blum"
+date: "2024-01-31"
+categories: [code, analysis]
+image: "hatespeech.jpg"
+output: html_document
+---
+
+# Hate-Speech vorhersagen
+
+Wir betrachten einen Datensatz mit Tweets, die schon nach Hate Speech klassifiziert wurden. Mein Ziel ist es nun, auch eine Klassifizierung vorznehmen. Einmal mithilfe von einem eigenen tidymodels Modell und noch einmal mit einem neuronalen Netzwerk.
+
+Aber bevor wir zu den Klassifizierungsmodellierungen kommen, wollen wir erst einmal einen Blick auf den Datensatz an sich werfen. Schauen wir also, was die mehr oder vielleicht auch weniger wütenden Menschen geschrieben haben.
+
+## Verwendete Pakete
+
+```{r, echo=FALSE}
+library(tidyverse)
+library(tokenizers)
+library(tidytext)
+library(hcandersenr)
+library(SnowballC)  # Stemming
+library(lsa)        # Stopwörter
+library(easystats)  # Komfort für deskriptive Statistiken, wie `describe_distribution`
+library(textclean)  # Emojis ersetzen
+library(wordcloud)
+library(textplot)   # Vizzzz
+library(textdata)   # Worteinbettungen, vorgekocht
+library(widyr)      # Ähnlichkeit berechnen mit widyr_svd
+library(slider)     # slide
+library(entropy)    # Entropie berechnen
+library(textrecipes)
+library(naivebayes)
+library(discrim)
+library(tokenizers)
+library(tictoc)
+library(syuzhet)
+library(tidymodels)
+```
+
+## Daten laden
+
+```{r}
+d_hate <- read_csv("~/1 Studium/5. Semester/DS II/Pruefung/d_hate.csv")
+View(d_hate)
+```
+
+## EDA
+
+## tidy

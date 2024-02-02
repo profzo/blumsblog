@@ -10,7 +10,6 @@ listing:
 page-layout: full
 title-block-banner: true
 ---
-
 # Blum's Blog
 
 ## Browsen Sie weiter, hier gibt es nichts zu sehen!
