@@ -2,7 +2,9 @@
   {
     "listing": "/index.html",
     "items": [
-      "/posts/pruefungsleistung.html"
+      "/posts/post-with-code/index.html",
+      "/posts/pruefungsleistung.html",
+      "/posts/welcome/index.html"
     ]
   }
 ]

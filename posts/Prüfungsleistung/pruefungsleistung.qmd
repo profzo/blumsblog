@@ -1,7 +1,9 @@
 ---
-title: "pruefungsleistung"
+title: "Prüfungsleistung DSii"
 author: "Felix Blum"
 date: "2024-01-31"
+categories: [code, analysis]
+image: "hatespeech.jpg"
 output: html_document
 ---
 
