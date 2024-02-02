@@ -17,3 +17,5 @@ about:
 ---
 
 About this blog
+Ich lade hier meine Projekte aus meiner Data-Science-Vorlesung hoch. 
+Und vielleicht mal mehr.

@@ -9,7 +9,35 @@ output: html_document
 
 # Hate-Speech vorhersagen
 
+## Verwendete Pakete
+
+```{r}
+library(tidyverse)
+library(tokenizers)
+library(tidytext)
+library(hcandersenr)
+library(SnowballC)  # Stemming
+library(lsa)        # Stopwörter
+library(easystats)  # Komfort für deskriptive Statistiken, wie `describe_distribution`
+library(textclean)  # Emojis ersetzen
+library(wordcloud)
+library(textplot)   # Vizzzz
+library(textdata)   # Worteinbettungen, vorgekocht
+library(widyr)      # Ähnlichkeit berechnen mit widyr_svd
+library(slider)     # slide
+library(entropy)    # Entropie berechnen
+library(textrecipes)
+library(naivebayes)
+library(discrim)
+library(tokenizers)
+library(tictoc)
+library(syuzhet)
+library(tidymodels)
+```
+
 ## Daten laden
+
+
 
 ## Packages
 
