@@ -2,7 +2,7 @@
 title: "Prüfungsleistung DSii"
 author: "Felix Blum"
 date: "2024-01-31"
-categories: [code, analysis]
+categories: [code, text analysis, hate speech]
 image: "hatespeech.jpg"
 output: html_document
 ---
@@ -14,7 +14,7 @@ Viel Vergnügen!
 
 ### Verwendete Pakete
 
-```{r, echo=FALSE}
+```{r, warning=FALSE, message=FALSE}
 library(tidyverse)  # data manipulation & plotting
 library(tidytext)   # provides additional text mining functions, sentiments
 library(easystats)  # Komfort für deskriptive Statistiken, wie `describe_distribution`
@@ -47,9 +47,13 @@ palette.colors(palette = "Okabe-Ito")
      "#0072B2"     "#D55E00"     "#CC79A7"     "#999999" 
 
 ### Der zu analysierende Datensatz
+```{r include=FALSE}
+datenpfad <- "C:/Users/Emilia Braun/OneDrive/Desktop/d_hate.csv"
+```
 
-```{r, echo=FALSE}
-d_hate <- read_csv("~/1 Studium/5. Semester/DS II/Pruefung/d_hate.csv")
+
+```{r}
+d_hate <- read_csv(datenpfad)
 glimpse(d_hate)
 ```
 
@@ -153,7 +157,7 @@ d_hate_tok_wstop %>%
 
 Das ganze nochmal, aber jetzt nach Klassifikation sortiert:
 
-```{r}
+```{r warning=FALSE}
 library(reshape2)
 
 d_hate_tok_wstop %>% 
@@ -196,6 +200,7 @@ Es gibt ungefähr gleich viele polarisierende Wörter auf Seiten der Hate Speech
 d_hate_senti %>% 
   ggplot() +
   geom_density(aes(value, fill = class, colour = class), alpha = 0.3) +
+  scale_fill_manual(values = c("#D55E00", "#56B4E9")) +
   theme_minimal()
 ```
 
@@ -213,6 +218,7 @@ hate_sentir <-
 hate_sentir %>% 
   ggplot() +
   geom_density(aes(sentiment, fill = class, colour = class), alpha = 0.3) +
+  scale_fill_manual(values = c("#D55E00", "#56B4E9")) +
   theme_minimal()
 ```
 
@@ -222,7 +228,7 @@ Mit sentimentr kann man zusätzlich noch die Emotionen und Schimpfwörter analys
 
 ```{r}
 hate_emos <-
-  d_hate_sents %>% 
+  d_hate %>% 
   sentimentr::get_sentences() %>% 
   emotion() %>% 
   filter(!word_count == 0,
@@ -234,6 +240,7 @@ hate_emos %>%
   ggplot(aes(emotion_type, fill = class, colour = class)) +
   geom_bar() +
   scale_x_discrete(guide = guide_axis(angle = 60)) +
+  scale_fill_manual(values = c("#D55E00", "#56B4E9")) +
   theme_minimal()
 ```
 
@@ -241,7 +248,7 @@ Das ist ein sehr großer Datensatz, deshalb will ich für jede id/ jeden Tweet d
 
 ```{r}
 hate_emos2 <-
-  d_hate_sents %>% 
+  d_hate %>% 
   sentimentr::get_sentences() %>% 
   emotion()
 
@@ -266,9 +273,9 @@ Zwar muss bei dieser Grafik beachtet werden, dass der Anteil von other generell 
 
 Nun zu den Schimpfwörtern:
 
-```{r}
+```{r warning=FALSE}
 hate_prof <-
-  d_hate_sents %>% 
+  d_hate %>% 
   sentimentr::get_sentences() %>% 
   profanity() %>% 
   filter(!word_count == 0)
@@ -280,6 +287,7 @@ Kritik: Das Schimpfwortlexikon von sentimentr listet das N-Wort in manchen Schre
 hate_prof %>% 
   ggplot(aes(element_id, profanity_count, fill = class)) +
   geom_bin_2d() +
+  scale_fill_manual(values = c("#D55E00", "#56B4E9")) +
   theme_minimal()
 ```
 
@@ -442,7 +450,7 @@ added_sw <- bind_rows(sw_combi, sw_erg)
 ```
 
 
-```{r}
+```{r warning=FALSE, message=FALSE}
 library(igraph)
 
 (bigram_graph <- bigrams_hate %>% 
@@ -562,7 +570,7 @@ rsmpl <- vfold_cv(train_hate, v = 3, repeats = 2)
 
 ### Tune & Fit
 
-```{r}
+```{r warning=FALSE, message=FALSE}
 tic()
 wf_tune <-
   wf1 %>% 
@@ -593,7 +601,7 @@ metrics %>%
 
 
 ### Das beste Modell auswählen & Fitten
-```{r}
+```{r warning=FALSE, message=FALSE}
 final_fit <- 
   fit_best(wf_tune)
 ```
@@ -603,7 +611,8 @@ Welche Prädiktoren waren bei diesem Modell die wichtigsten?
 ```{r}
 final_fit %>%
   extract_fit_parsnip() %>%
-  vip(num_features = 15, geom = "point")
+  vip(num_features = 15, geom = "point") +
+  theme_minimal()
 ```
 
 Wie schon in der EDA vermutet, nehmen Schimpfwörter einen sehr prominenten Wert in der Vorhersage ein. Zusammen mit den beiden Sentiment-Lexika und dem tf_idf-Wert für "white" führt es die Liste an.
@@ -641,31 +650,27 @@ Ich habe mich hier für das Modell entschieden, das im Bezug auf Hate-Speech-Det
 ### Python-Setup & Daten
 
 ```{r setup, echo=FALSE}
-#library(reticulate)
-#use_virtualenv("~/1 Studium/5. Semester/DS II/Pruefung/blumsblog/dsiivirtualenv")
+library(reticulate)
+use_virtualenv("~/Blog/blumsblog/dsiivirtualenv")
 ```
 
 ```{python}
-#import tensorflow as tf
-#from transformers import pipeline
+import tensorflow as tf
+from transformers import pipeline
 ```
 
 ```{r}
-#tweet <- d_test$tweet
+tweet <- test_hate$tweet
 ```
 
 ```{python}
-#hate_py = r.tweet
+hate_py = r.tweet
 ```
 
 ### Pipeline
 
 ```{python}
-#classifier = pipeline("text-classification", model="Hate-speech-CNERG/bert-base-uncased-hatexplain")
-```
-
-```{python}
-#classifier = pipeline("text-classification", model="facebook/roberta-hate-speech-dynabench-r4-target")
+classifier = pipeline("text-classification", model="facebook/roberta-hate-speech-dynabench-r4-target")
 ```
 
 ```{python}
@@ -682,15 +687,37 @@ head(r_results)
 ```
 
 ```{r}
+label <- map(r_results, ~.$label)
 
+pred_hate_py <- 
+  bind_cols(pred_test1, pred_py = unlist(label))
+
+pred_hate_py <- 
+  pred_hate_py %>%
+  mutate(pred_py = case_when(pred_py == "hate" ~ "hate speech",
+                             pred_py == "nothate" ~ "other"))  %>%
+  mutate(pred_py = ifelse(pred_py == "hate speech", 1, 0))
 ```
 
+```{r}
+rocobj <- 
+  pred_hate_py %>% 
+  roc(class, pred_py)
 
-reticulate::py_available()
+ggroc(rocobj, colour = "#E69F00", size = 1.5)
+```
 
-reticulate::py_config()
+Ok, diese Form der "Kurve" weist Ähnlichkeiten zu der Kurve meines eigenen Modells auf... Allerdings hat dieses Modell einen steileren Anstieg, was beseutet, dass der Klassifikator mit höherer Genauigkeit positive Vorhersagen trifft, bevor viele falsch positive Vorhersagen gemacht werden.
 
+```{r}
+diff_pred <- 
+  pred_hate_py %>%
+  group_by(class) %>%
+  count(pred_py != .pred_class)
+diff_pred
+```
 
+Im direkten Vergleich haben das Transformer-Modell von Huggingface und mein tidymodels-Modell 269 Werte verschieden bewertet. Unter Nicht-Hate Speech gab es etwas mehr Unstimmigkeiten als bei Hate Speech selbst.
 
 ## Fazit
 
@@ -699,7 +726,7 @@ Die Klassifikation von Hate Speech in sozialen Netzwerken bleibt ein Buch mit vi
 *"According to the censorship log leaked by the social media app Xiaohongshu in 2020, 564 words were considered “sensitive” by the Chinese government when referring to Xi."* Xiao H., 2023 (https://wagingnonviolence.org/2023/04/how-subvversive-nicknames-for-china-present-xi-jinping-fuel-dissent/; abgerufen am 09.02.24)
 
 ... und es werden nicht weniger!
-Dennoch stellt dieser Blog einige Ansatzpunkte dar, die zumindest ein paar der Siegel öffnen können. 
+Dennoch stellt dieser Blog einige Ansatzpunkte und verschiedene Möglichkeiten dar, die zumindest ein paar der Siegel öffnen können. 
 Alles darüber hinaus wird die Zukunft bringen!
 
 
