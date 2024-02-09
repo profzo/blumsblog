@@ -7,45 +7,696 @@ image: "hatespeech.jpg"
 output: html_document
 ---
 
-# Hate-Speech vorhersagen
+# X-trem - Hate Speech Vorhersage auf Twitter
 
-Wir betrachten einen Datensatz mit Tweets, die schon nach Hate Speech klassifiziert wurden. Mein Ziel ist es nun, auch eine Klassifizierung vorznehmen. Einmal mithilfe von einem eigenen tidymodels Modell und noch einmal mit einem neuronalen Netzwerk.
+X, vormals Twitter, ist schon lange als Hexenkessel bzw. Sammelbecken für Internet-Trolle bekannt. Nirgendwo sonst im Internet wird so prominent polarisiert, getrollt oder beleidigt. Unter anderem deshalb bietet sich die Plattform an, um die Beiträge dr Mitglieder zu analysieren und Hassrede zu identifizieren. In diesem Beitrag soll eine Auswahl solcher Tweets genauer untersucht werden. Zuerst wird der Datensatz pr Explorative Datenanalyse dargestellt. Danach werden mehrere Klassifikationen nach Hate Speech vorgenommen mittels verschiedener Methoden des Text-Minings.
+Viel Vergnügen!
 
-Aber bevor wir zu den Klassifizierungsmodellierungen kommen, wollen wir erst einmal einen Blick auf den Datensatz an sich werfen. Schauen wir also, was die mehr oder vielleicht auch weniger wütenden Menschen geschrieben haben.
-
-## Verwendete Pakete
+### Verwendete Pakete
 
 ```{r, echo=FALSE}
-library(tidyverse)
-library(tokenizers)
-library(tidytext)
-library(hcandersenr)
-library(SnowballC)  # Stemming
-library(lsa)        # Stopwörter
+library(tidyverse)  # data manipulation & plotting
+library(tidytext)   # provides additional text mining functions, sentiments
 library(easystats)  # Komfort für deskriptive Statistiken, wie `describe_distribution`
-library(textclean)  # Emojis ersetzen
-library(wordcloud)
-library(textplot)   # Vizzzz
-library(textdata)   # Worteinbettungen, vorgekocht
-library(widyr)      # Ähnlichkeit berechnen mit widyr_svd
-library(slider)     # slide
-library(entropy)    # Entropie berechnen
+library(tidymodels) 
+library(stopwords)  # Stopwörter entfernen
+library(wordcloud)  # Wordclouds erstellen
+library(RColorBrewer)# für wordcloud
+library(sentimentr)
+library(widyr)      # Ähnlichkeit/ pmi berechnen mit widyr_svd
+library(irlba)      # widely_svd()
+library(furrr)      # für future_map bei pmi berechnen
 library(textrecipes)
-library(naivebayes)
-library(discrim)
 library(tokenizers)
+library(syuzhet) 
+library(lexicon)
+library(xgboost)
 library(tictoc)
-library(syuzhet)
-library(tidymodels)
+library(vip)
+
+library(texter)     # removeURL
+
+library(textclean)  # Emojis ersetzen
 ```
 
-## Daten laden
+#### Verwendete Farben
+Color Palettes for Color Blindness:
+Okabe-Ito palette as suggested by Okabe & Ito (2008) (https://jfly.uni-koeln.de/color/)
+palette.colors(palette = "Okabe-Ito")
+         black        orange       skyblue   bluishgreen        yellow 
+     "#000000"     "#E69F00"     "#56B4E9"     "#009E73"     "#F0E442" 
+          blue    vermillion reddishpurple          gray 
+     "#0072B2"     "#D55E00"     "#CC79A7"     "#999999" 
+
+### Der zu analysierende Datensatz
+
+```{r, echo=FALSE}
+d_hate <- read_csv("~/1 Studium/5. Semester/DS II/Pruefung/d_hate.csv")
+glimpse(d_hate)
+```
+
+## EDA - Explorative Datenanalyse
+
+Der Datensatz besteht aus 5593 Tweets, wovon kanpp 26% als Hate Speech klassifiziert wurden.
 
 ```{r}
-d_hate <- read_csv("~/1 Studium/5. Semester/DS II/Pruefung/d_hate.csv")
-View(d_hate)
+ggplot(d_hate, aes(x = "", y = "", fill = class)) +
+  geom_col() +
+  coord_polar(theta = "y") +
+   scale_fill_manual(values = c("#D55E00", "#56B4E9")) +
+  theme_void()
 ```
 
-## EDA
+Wir können schon beim ersten Überfliegen des Datensatzes sehen, dass uns harter Tobak erwartet:
+Trans- & Homofeindlichkeit, Rassismus, Misogynie...
 
-## tidy
+"Why people think gay marriage is okay is beyond me.[...]" id 598
+"Those n*****s disgust me. They should have dealt with 100 years ago, we wouldn't be having these problems now." id 2483
+
+Aber dazu später mehr. Zuerst ein paar Grundlagen:
+Auch fällt auf, dass viele Usernames und URL's inbegriffen sind. Diese sind vielleicht nicht relevant für unsere Analyse und sollten später evtl. aussortiert werden (starts_with("http", "@"))
+
+#### Tokenisierung
+
+Um einzelne Wörter graphisch darstellbar zu machen, zerlegen wir die Tweets in ihre einzelnen Strings, also Wörter. Da sich die Funktion unnest_tokens() hier allerdings nicht so gut anstellt, benötigen wir einen eigenen Tokenizer. Dieser ist so angepasst, dass Usernamen und Links in den Tweets nicht aufgenommen werden.
+
+```{r}
+txt <- "@BabyAnimalPics: baby monkey bathtime http://t.co/7KPWAdLF0R Awwwwe! This is soooo ADORABLE!"
+
+str_split(txt, "[:space:]+") %>%
+    map(~ str_remove_all(.x, "@[^ ]+|https?[:graph:]+|^[:punct:]+|[:punct:]+"))
+```
+
+Dazu müssen noch alle möglichen Zahlen entfernt werden wie z.B. Unicodes von auf Twitter genutzten Emojis oder Geldbeträge. 
+Alles zu einer Funktion kombiniert, könnte wie folgt aussehen:
+
+```{r}
+tokenize_words <- function(x, lowercase = TRUE) {
+  if (lowercase)
+    x <- str_to_lower(x)
+  
+  str_split(x, "[:space:]") %>%
+    map(~ str_remove_all(.x, 
+          "@[^ ]+|https?[:graph:]+|\\{\\$[0-9\\.]*\\}|[\U{1F300}-\U{1F6FF}]|^[:punct:]+|[:punct:]+|\\d+")) %>% 
+    unlist()
+}
+```
+
+Mal probieren ob es klappt:
+
+```{r}
+d_hate_regtok <-
+  d_hate %>%
+    mutate(word = map(tweet, tokenize_words)) %>% 
+  unnest(cols = word)%>% 
+  select(-tweet) %>% 
+  filter(!word == "")
+head(d_hate_regtok)
+```
+
+Schon besser!
+
+#### Stopwords
+
+Es befinden sich noch einige Strings in der Liste, die keine (analysierbaren) Wörter darstellen. Da hilft nur eines:
+Stopwörter entfernen! Hierzu kombiniere ich einige gängige Listen und ergänze sie mit einer eigenen, auf den Datensatz zugeschnittene Liste (z.B. "rt" ist die Abkürzung von "retweet", "yall" als umgangssprachliche Form von "you all"). 
+
+```{r}
+sw_snowball <- get_stopwords(source = "snowball")
+sw_iso <- get_stopwords(source = "stopwords-iso")
+sw_smart <- get_stopwords(source = "smart")
+sw_tweet <- tibble(word = c("rt", "da", "yall", "ur", "yo", "dat", "smh", "tho", "ya", "bout", "em", "dis", "bc", "dem", "ima", "|", "dc", "$", "+"))
+sw_combi <- 
+  bind_rows(sw_snowball, sw_iso, sw_smart, sw_tweet) %>% 
+  select(-lexicon)
+
+d_hate_tok_wstop <- 
+  d_hate_regtok %>% 
+  anti_join(sw_combi)
+head(d_hate_tok_wstop)
+```
+
+#### Worthäufigkeiten
+
+Nun, da die Tweets in ihre einzelnen Wörter aufgeteilt und bereinigt sind, können wir wunderbar visualisieren was der Datensatz bereithält.
+
+Welche Wörter kommen am häufigsten vor?
+
+```{r}
+d_hate_tok_wstop %>%
+  count(word, sort = TRUE) %>% 
+  slice_max(order_by = n, n = 20) %>% 
+  mutate(word = factor(word)) %>% 
+  ggplot() +
+  aes(y = reorder(word, n), x = n) +
+  geom_col(fill = "#0072B2") +
+  theme_minimal()
+```
+
+Das ganze nochmal, aber jetzt nach Klassifikation sortiert:
+
+```{r}
+library(reshape2)
+
+d_hate_tok_wstop %>% 
+  count(word, class, sort = TRUE) %>%
+  acast(word ~ class, value.var = "n", fill = 0) %>%
+  comparison.cloud(colors = c("#D55E00", "#56B4E9",
+                              title.bg.colors="white"),
+                   max.words = 100)
+```
+
+*"Man sieht: Es sind Schimpfwörter im Haus!"*
+Das könnte für die weitere Analyse/ Klassifikation interessantwerden, ebenso wie mögliche Codewörter wie "brownie" (Personen mit dunkler Hautfarbe) oder "birds" (Frauen).
+
+#### Sentimentanalyse
+
+Die Sentimentanalyse erkennt und bewertet den überwiegende "Ton" oder die "Stimmung" eines Textes. Dieser Prozess kann auf einzelne Sätze, Absätze oder sogar auf gesamte Dokumente angewendet werden. Wir konzentrieren uns hier einmal auf einzelne Wörter mithilfe des Lexikons afinn und einmal auf die Bewertung im Kontext eines ganzen Satzes mit dem Paket sentimentr.
+
+Mit afinn:
+```{r}
+AFINN <- get_sentiments(lexicon = "afinn")
+```
+
+```{r}
+d_hate_senti <-
+d_hate_tok_wstop %>% 
+  inner_join(AFINN, by = "word")
+```
+
+```{r}
+d_hate_senti %>% 
+  group_by(class) %>% 
+  summarise(polarity_sum = sum(value),
+            polarity_count = n()) %>% 
+  mutate(polarity_prop = (polarity_count / sum(polarity_count)) %>% round(2))
+```
+
+Es gibt ungefähr gleich viele polarisierende Wörter auf Seiten der Hate Speech und der Übrigen. Jedoch sind die Wörter unter Hate Speech deutlich stärker emotional negativ aufgeladen.
+
+```{r}
+d_hate_senti %>% 
+  ggplot() +
+  geom_density(aes(value, fill = class, colour = class), alpha = 0.3) +
+  theme_minimal()
+```
+
+Mit sentimentr:
+
+```{r}
+hate_sentir <-
+  d_hate %>% 
+  sentimentr::get_sentences() %>% 
+  sentiment() %>% 
+  filter(!word_count == 0)
+```
+
+```{r}
+hate_sentir %>% 
+  ggplot() +
+  geom_density(aes(sentiment, fill = class, colour = class), alpha = 0.3) +
+  theme_minimal()
+```
+
+Im Vergleich zur Sentimenteinteilung von afinn sieht man hier eine ganz klare Spitze beim Wert der neutralen Bestandteile. Das liegt vor allem an der ungenauen Eintilung vom Befehl get_sentences(), der etliche Nicht-Sätze erstellt, die als neutral gewertet werden. Das könnte aber auch an der unterschiedlichen Herangehensweise, das Sentiment über die einzelnen Wörter bzw. im Kontext des gesamten Satzes zu ermitteln. Einzelne Wörter sind einfacher zu erkennen und eindeutiger zu bewerten.
+
+Mit sentimentr kann man zusätzlich noch die Emotionen und Schimpfwörter analysieren.
+
+```{r}
+hate_emos <-
+  d_hate_sents %>% 
+  sentimentr::get_sentences() %>% 
+  emotion() %>% 
+  filter(!word_count == 0,
+         !emotion_count == 0)
+```
+
+```{r}
+hate_emos %>% 
+  ggplot(aes(emotion_type, fill = class, colour = class)) +
+  geom_bar() +
+  scale_x_discrete(guide = guide_axis(angle = 60)) +
+  theme_minimal()
+```
+
+Das ist ein sehr großer Datensatz, deshalb will ich für jede id/ jeden Tweet die dominante Emotion herausfinden und darauf basierend den Datensatz verschlanken.
+
+```{r}
+hate_emos2 <-
+  d_hate_sents %>% 
+  sentimentr::get_sentences() %>% 
+  emotion()
+
+dominant_emotion_df <- 
+  hate_emos2 %>%
+  group_by(id, emotion_type) %>%
+  summarize(weighted_score = sum(emotion_count * emotion)) %>%
+  dplyr::slice(which.max(weighted_score)) %>%
+  ungroup()
+
+dominant_emo_hate <-
+  merge(d_hate, dominant_emotion_df, by = "id")
+
+dominant_emo_hate %>% 
+  ggplot(aes(class, emotion_type)) +
+  geom_bin2d() + 
+  theme_minimal()
+```
+Klappt! 
+
+Zwar muss bei dieser Grafik beachtet werden, dass der Anteil von other generell sehr viel größer ist, als der von hate speech und dementsprechend heller ist. Trotzdem kann man hier gut erkennen, welche Emotionen in den Tweets mit Hate Speech wohl vorherrscht: Wut, Ekel, Niedergeschlagenheit
+
+Nun zu den Schimpfwörtern:
+
+```{r}
+hate_prof <-
+  d_hate_sents %>% 
+  sentimentr::get_sentences() %>% 
+  profanity() %>% 
+  filter(!word_count == 0)
+```
+
+Kritik: Das Schimpfwortlexikon von sentimentr listet das N-Wort in manchen Schreibweisen nicht als Schimpfwort!
+
+```{r}
+hate_prof %>% 
+  ggplot(aes(element_id, profanity_count, fill = class)) +
+  geom_bin_2d() +
+  theme_minimal()
+```
+
+Die Tweets, die einen hohen Anteil an Schimpfwörtern haben, sind eher unter hate speech gefallen, als andere.
+
+#### Word Embeddings
+
+Word Embeddings sind eine Methode, um Textdaten als Vektoren von Zahlen darzustellen, basierend auf einem großen Textkorpus. Anders als bei tf_idf wird dabei die semantische Bedeutung aus dem Kontext der Wörter erfasst und die Textinformationen auf einen sehr dichte Raum reduziert. Aus diesem Grund tachen sie auch hier auf. Außerdem können wir dadurch erkennen, in welchem Kontext unsere angeblichen Codewörter stehen, und beurteilen, ob sie hier in erster Linie als solche verwendet werden. 
+
+```{r}
+tidy_hate <-
+  d_hate_tok_wstop %>% 
+  add_count(word) %>% 
+  filter(n >= 15) %>% 
+  select(-n)
+```
+
+```{r}
+nested_hate <-
+  tidy_hate %>% 
+  nest(words = c(word))
+```
+
+```{r}
+slide_windows <- function(tbl, window_size) {
+  skipgrams <- slider::slide(
+    tbl, 
+    ~.x,  # Syntax ähnlich zu purrr::map()
+    .after = window_size - 1, 
+    .step = 1, 
+    .complete = TRUE
+  )
+    safe_mutate <- safely(mutate)
+  
+  out <- map2(skipgrams,
+              1:length(skipgrams),
+              ~ safe_mutate(.x, window_id = .y))
+  
+  out %>%
+    transpose() %>%
+    pluck("result") %>%
+    compact() %>%
+    bind_rows()
+}
+```
+
+```{r}
+hate_pmi <- nested_hate %>%
+  mutate(words = future_map(words, slide_windows, 4L)) %>% 
+  unnest(words) %>% 
+  unite(window_id, id, window_id) %>% 
+  pairwise_pmi(word, window_id)
+
+hate_pmi
+```
+
+```{r}
+hate_word_vectors <- hate_pmi %>%
+  widely_svd(
+    item1, item2, pmi,
+    nv = 100, maxit = 1000
+  )
+```
+
+-> Um zu entdecken, welche Wörter sich am nächsten stehen. Hier kommen die erwähnten Codewörter ins Spiel.
+
+```{r}
+nearest_neighbors <- function(df, token) {
+  df %>%
+    widely(
+      ~ {
+        y <- .[rep(token, nrow(.)), ]
+        res <- rowSums(. * y) / 
+          (sqrt(rowSums(. ^ 2)) * sqrt(sum(.[token, ] ^ 2)))
+        
+        matrix(res, ncol = 1, dimnames = list(x = names(res)))
+      },
+      sort = TRUE
+    )(item1, dimension, value) %>%
+    select(-item2)
+}
+```
+
+Für Bird:
+
+```{r}
+hate_word_vectors %>% 
+  nearest_neighbors("bird") %>% 
+  slice_max(order_by = value, n = 20) %>%
+  mutate(word = factor(item1)) %>% 
+  ggplot() +
+  aes(y = reorder(word, value), x = value) +
+  geom_col(fill = "#CC79A7") +
+  theme_minimal()
+```
+
+Die Worte mit dem höchsten Wert lassen sich plausibel erklären und scheinen nicht sehr viel mit einem möglichen frauenverachtenden Codewort zu tun zu haben.(play, Flappy Birds, Angry Birds, games)
+
+```{r}
+hate_word_vectors %>% 
+  nearest_neighbors("brownie") %>% 
+  slice_max(order_by = value, n = 20) %>%
+  mutate(word = factor(item1)) %>% 
+  ggplot() +
+  aes(y = reorder(word, value), x = value) +
+  geom_col(fill = "#0072B2") +
+  theme_minimal()
+```
+
+Hier beziehen sich die meisten Wörter auch auf das Gebäck, statt auf Menschen Bezug zu nehmen.
+
+Um nochmal sicher zu gehen, ob dieses Vorgehen auch verlässlich ist, probieren wir es mit einem offensichtlichen Begriff
+
+```{r}
+hate_word_vectors %>% 
+  nearest_neighbors("nigga")
+```
+Definitiv im Kontext negativerer Wörter!
+
+
+Um diese Embeddings für das spätere Modell zugänglich zu machen folgen noch ein paar Schritte.
+
+```{r}
+word_matrix <- tidy_hate %>%
+  count(id, word) %>%
+  cast_sparse(id, word, n) 
+
+embedding_matrix <- hate_word_vectors %>%
+  cast_sparse(item1, dimension, value)
+
+doc_matrix <- word_matrix %*% embedding_matrix
+
+dim(doc_matrix)
+```
+
+```{r}
+print(dim(word_matrix))
+print(dim(embedding_matrix))
+```
+
+```{r}
+diff_matrix <- dim(word_matrix) != dim(embedding_matrix)
+diff_matrix
+```
+
+Aus irgendeinem Grund gibt es einen Unterschied in den Matrizen, sodass ich sie nicht verbinden kann. Schade!
+
+#### n-grams
+
+n-grams stellen eine weitere Möglichkeit der Textanalyse dar, um Muster, Zusammenhänge und Beziehungen zwischen aufeinanderfolgenden Wörtern zu analysieren. Bigramme sind eine Sequenz von zwei aufeinanderfolgenden Elementen oder - in unserem Fall - Wörtern in einem Text. Als kleine Ergänzung zu den mögliche Codewörtern unter Word-Embeddings möchte ich hier noch einmal herausfinden welche kombinierten Wörter denn wirklich häufig verwendet werden.
+
+```{r}
+bigrams_hate <-
+  d_hate %>% 
+  unnest_tokens(bigram, tweet, token = "ngrams", n = 2)
+```
+
+```{r}
+sw_erg <- tibble(word = c("t.co", "128557", "128514", "ho", "8230", "9733", "https", "http"))
+added_sw <- bind_rows(sw_combi, sw_erg)
+```
+
+
+```{r}
+library(igraph)
+
+(bigram_graph <- bigrams_hate %>% 
+    separate(bigram, c("word1", "word2"), sep = " ") %>%
+        filter(!word1 %in% added_sw$word,
+               !word2 %in% added_sw$word) %>%
+        count(word1, word2, sort = TRUE) %>%
+        unite("bigram", c(word1, word2), sep = " ") %>%
+        filter(n > 10) %>%
+        graph_from_data_frame()
+)
+```
+
+```{r}
+library(ggraph)
+set.seed(42)
+
+a <- grid::arrow(type = "closed", length = unit(.15, "inches"))
+
+ggraph(bigram_graph, layout = "fr") +
+        geom_edge_link() +
+        geom_node_point(color = "#CC79A7", size = 5) +
+        geom_node_text(aes(label = name), vjust = 1, hjust = 1) +
+        theme_void()
+```
+
+Das mit Abstand am häufigsten vorkommende Bigramm ist "white trash", dicht gefolgt von "flappy bird". Anscheinend mussten viele ihren Frust an der digitalen Tastatur auslassen, nachdem sie das Spiel gespielt haben... Rassistsche und beleidigende Äußerungen wie "uncle tom" und "fucking faggot" sind ebenfalls vertreten, sowie das Stadion der New York Yankees und deren erfolgreicher Spieler Derek Jeter.
+
+## Modellierung
+
+Jetzt soll es aber endlich um die Vorhersage von Hate Speech gehen. Zuerst bleiben wir noch in R und bauen ein Klassifizierungsmodell für Hate Speech in tidymodels.Danach geht es weiter in Python und wir nutzen ein Large Language Model (LLM) für eine Zero-Shot-Learning-Vorhersage, also ohne vorheriges Fine-Tuning des LLM. 
+
+### Split in Test und Train-Datensatz
+
+```{r}
+set.seed(42)
+hate_split <- initial_split(d_hate, strata = class)
+
+train_hate <- training(hate_split)
+test_hate <- testing(hate_split)
+```
+
+### Recipe
+
+Wir brauchen noch folgende Listen vorab, da sich die Befehle von sentimentr schlecht in ein recipe einfügen lassen.
+
+```{r}
+data(hash_sentiment_jockers_rinker)
+View(hash_sentiment_jockers_rinker)
+hash <- hash_sentiment_jockers_rinker %>% 
+  rename(word = x,
+         value = y)
+
+profal <- unique(tolower(profanity_alvarez)) 
+data("profanity_racist")
+profanity <- c(profal, profanity_racist)
+```
+
+
+```{r}
+rec1 <-
+  recipe(class ~ ., data = train_hate) %>% 
+  update_role(id, new_role = "id") %>% 
+  update_role(tweet, new_role = "ignore") %>% 
+  step_text_normalization(tweet) %>% 
+  step_mutate(senta = get_sentiment(tweet, method = "afinn"),
+              sentr = get_sentiment(tweet, method = "custom", lexicon = hash)) %>% 
+  step_tokenize(tweet, token = "words") %>%
+  step_stopwords(tweet, custom_stopword_source = "sw_combi") %>% 
+  step_tokenfilter(tweet, max_tokens = 1e2) %>% 
+  step_tfidf(tweet) %>% 
+  step_zv(all_predictors()) %>%
+  step_normalize(all_numeric_predictors())
+```
+
+
+### Modell & Workflow
+
+```{r}
+mod1 <-
+  boost_tree(mtry = tune(), 
+            min_n = tune(), 
+            trees = tune(),
+            tree_depth = tune(),
+            learn_rate = tune(),
+            loss_reduction = tune(),
+           mode = "classification") %>% 
+  set_engine("xgboost", nthreads = 4)
+```
+
+
+```{r}
+wf1 <-
+  workflow() %>% 
+  add_model(mod1) %>% 
+  add_recipe(rec1)
+```
+
+### Folds
+
+```{r}
+set.seed(42)
+rsmpl <- vfold_cv(train_hate, v = 3, repeats = 2)
+```
+
+### Tune & Fit
+
+```{r}
+tic()
+wf_tune <-
+  wf1 %>% 
+  tune_grid(
+    resamples = rsmpl,
+    grid = 2, 
+    seed = 42,
+    metrics = metric_set(accuracy, f_meas, roc_auc),
+    control = control_grid(verbose = TRUE))
+toc()
+```
+
+```{r}
+tune::autoplot(wf_tune) +
+  theme(legend.position = "bottom")
+```
+
+```{r}
+metrics <-
+wf_tune %>% 
+  collect_metrics()
+```
+--> man sieht: rec2_boost1 schneidet am Besten ab.
+
+### Finalisieren & Fitten
+
+```{r}
+tic()
+final_fit <-
+  fit(wf_tune,
+      data = train_hate)
+toc()
+```
+
+```{r}
+final_fit %>%
+  extract_fit_parsnip() %>%
+  vip(num_features = 15, geom = "point")
+```
+
+### Predict aufs eigene Test-Sample
+
+```{r}
+pred_test <- 
+  final_fit %>% 
+  predict(new_data = test_hate) %>% 
+  bind_cols(test_hate)
+```
+
+
+
+
+## Transformer-Modell
+
+Wir nutzen Transformer-Modelle über die Huggingface-API für unser Zero-Shot-Learning.
+Ich habe mich hier für das Modell entschieden, das im Bezug auf Hate-Speech-Detection im Internet am häufigsten heruntergeladen wurde und sich in den Suchvorschlägen ganz oben befindet.
+
+### Python-Setup & Daten
+
+```{r setup, echo=FALSE}
+#library(reticulate)
+#use_virtualenv("~/1 Studium/5. Semester/DS II/Pruefung/blumsblog/dsiivirtualenv")
+```
+
+```{python}
+#import tensorflow as tf
+#from transformers import pipeline
+```
+
+```{r}
+#tweet <- d_test$tweet
+```
+
+```{python}
+#hate_py = r.tweet
+```
+
+### Pipeline
+
+```{python}
+#classifier = pipeline("text-classification", model="Hate-speech-CNERG/bert-base-uncased-hatexplain")
+```
+
+```{python}
+#classifier = pipeline("text-classification", model="facebook/roberta-hate-speech-dynabench-r4-target")
+```
+
+
+reticulate::py_available()
+
+reticulate::py_config()
+
+## Neuronales Netz
+
+import keras
+import os
+import numpy as np
+import pandas as pd
+
+import tensorflow as tf
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Dense
+from sklearn.metrics import accuracy_score
+
+X_train = train_hate["tweet"].values
+X_test = test_hate["tweet"].values
+
+train_hate["y"] = train_hate["class"].map({"OTHER" : 0, "HATE SPEECH" : 1})
+y_train = train_hate.loc[:, "y"].values
+
+test_hate["y"] = test_hate["class"].map({"OTHER" : 0, "HATE SPEECH" : 1})
+y_test = test_hate.loc[:, "y"].values
+
+### Embedding
+
+embedding = "https://tfhub.dev/google/nnlm-en-dim50/2"
+hub_layer = hub.KerasLayer(embedding, input_shape=[], 
+                           dtype=tf.string, trainable=True)
+                           
+### Modell mit zwei Hidden Layers
+
+model = tf.keras.Sequential()
+model.add(hub_layer)
+model.add(Dense(32, input_dim=X_train.shape[1], activation='relu'))
+model.add(tf.keras.layers.Dense(16, activation='relu'))
+model.add(tf.keras.layers.Dense(1))
+
+
+model.compile(optimizer='adam',
+              loss=tf.keras.losses.BinaryCrossentropy(from_logits=True),
+              metrics=['accuracy'])
+
+### Fit
+
+model.fit(X_train, y_train, epochs=10, batch_size=16, validation_data=(X_test, y_test))
+
+### Predict
+
+y_pred = (model.predict(X_test) > 0.5).astype("int32")
+accuracy = accuracy_score(y_test, y_pred)
+print(f"Test Accuracy: {accuracy}")
+
+
+## Fazit
+
+
