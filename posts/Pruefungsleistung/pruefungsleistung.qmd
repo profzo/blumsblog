@@ -33,10 +33,8 @@ library(lexicon)
 library(xgboost)
 library(tictoc)
 library(vip)
-
-library(texter)     # removeURL
-
-library(textclean)  # Emojis ersetzen
+library(caret)
+library(pROC)
 ```
 
 #### Verwendete Farben
@@ -412,9 +410,8 @@ word_matrix <- tidy_hate %>%
 embedding_matrix <- hate_word_vectors %>%
   cast_sparse(item1, dimension, value)
 
-doc_matrix <- word_matrix %*% embedding_matrix
-
-dim(doc_matrix)
+#doc_matrix <- word_matrix %*% embedding_matrix
+#dim(doc_matrix)
 ```
 
 ```{r}
@@ -431,7 +428,7 @@ Aus irgendeinem Grund gibt es einen Unterschied in den Matrizen, sodass ich sie 
 
 #### n-grams
 
-n-grams stellen eine weitere Möglichkeit der Textanalyse dar, um Muster, Zusammenhänge und Beziehungen zwischen aufeinanderfolgenden Wörtern zu analysieren. Bigramme sind eine Sequenz von zwei aufeinanderfolgenden Elementen oder - in unserem Fall - Wörtern in einem Text. Als kleine Ergänzung zu den mögliche Codewörtern unter Word-Embeddings möchte ich hier noch einmal herausfinden welche kombinierten Wörter denn wirklich häufig verwendet werden.
+n-grams stellen eine weitere Möglichkeit der Textanalyse dar, um Muster, Zusammenhänge und Beziehungen zwischen aufeinanderfolgenden Wörtern zu analysieren. Bigramme sind eine Sequenz von zwei aufeinanderfolgenden Elementen oder - in unserem Fall - Wörtern in einem Text. Als kleine Ergänzung zu den mögliche Codewörtern unter Word-Embeddings möchte ich hier noch einmal herausfinden welche Wörter denn wirklich häufig zusammen verwendet werden.
 
 ```{r}
 bigrams_hate <-
@@ -481,8 +478,15 @@ Jetzt soll es aber endlich um die Vorhersage von Hate Speech gehen. Zuerst bleib
 ### Split in Test und Train-Datensatz
 
 ```{r}
+hate_for_rec <-
+  d_hate %>% 
+  mutate(tweet = str_remove_all(tweet, "@[^ ]+|https?[:graph:]+|\\{\\$[0-9\\.]*\\}|[\U{1F300}-\U{1F6FF}]|\\d+"))
+```
+
+
+```{r}
 set.seed(42)
-hate_split <- initial_split(d_hate, strata = class)
+hate_split <- initial_split(hate_for_rec, strata = class)
 
 train_hate <- training(hate_split)
 test_hate <- testing(hate_split)
@@ -490,7 +494,7 @@ test_hate <- testing(hate_split)
 
 ### Recipe
 
-Wir brauchen noch folgende Listen vorab, da sich die Befehle von sentimentr schlecht in ein recipe einfügen lassen.
+Wir brauchen noch folgende Listen vorab, da sich die Befehle von sentimentr schlecht in ein recipe einfügen lassen. Das im default verwendete Schimpfwort-Lexikon von sentimentr ergänze ich noch um ein anderes mit rassistischem Vokabular.
 
 ```{r}
 data(hash_sentiment_jockers_rinker)
@@ -501,7 +505,10 @@ hash <- hash_sentiment_jockers_rinker %>%
 
 profal <- unique(tolower(profanity_alvarez)) 
 data("profanity_racist")
-profanity <- c(profal, profanity_racist)
+profanity <- as_tibble(c(profal, profanity_racist))
+profanity <- profanity %>% 
+  rename(word = value) %>% 
+  mutate(value = 1)
 ```
 
 
@@ -512,7 +519,8 @@ rec1 <-
   update_role(tweet, new_role = "ignore") %>% 
   step_text_normalization(tweet) %>% 
   step_mutate(senta = get_sentiment(tweet, method = "afinn"),
-              sentr = get_sentiment(tweet, method = "custom", lexicon = hash)) %>% 
+              sentr = get_sentiment(tweet, method = "custom", lexicon = hash), 
+              profan = get_sentiment(tweet, method = "custom", lexicon = profanity))%>% 
   step_tokenize(tweet, token = "words") %>%
   step_stopwords(tweet, custom_stopword_source = "sw_combi") %>% 
   step_tokenfilter(tweet, max_tokens = 1e2) %>% 
@@ -521,6 +529,7 @@ rec1 <-
   step_normalize(all_numeric_predictors())
 ```
 
+baked <- bake(prep(rec1), new_data = NULL)
 
 ### Modell & Workflow
 
@@ -559,10 +568,10 @@ wf_tune <-
   wf1 %>% 
   tune_grid(
     resamples = rsmpl,
-    grid = 2, 
+    grid = 5, 
     seed = 42,
     metrics = metric_set(accuracy, f_meas, roc_auc),
-    control = control_grid(verbose = TRUE))
+    control = control_grid(verbose = TRUE, save_workflow = TRUE))
 toc()
 ```
 
@@ -574,25 +583,30 @@ tune::autoplot(wf_tune) +
 ```{r}
 metrics <-
 wf_tune %>% 
-  collect_metrics()
+  collect_metrics() 
+metrics %>% 
+  arrange(-mean) %>% 
+  head()
 ```
---> man sieht: rec2_boost1 schneidet am Besten ab.
 
-### Finalisieren & Fitten
+-> Preprocessor1_Model5 schneidet am besten ab.
 
+
+### Das beste Modell auswählen & Fitten
 ```{r}
-tic()
-final_fit <-
-  fit(wf_tune,
-      data = train_hate)
-toc()
+final_fit <- 
+  fit_best(wf_tune)
 ```
+
+Welche Prädiktoren waren bei diesem Modell die wichtigsten?
 
 ```{r}
 final_fit %>%
   extract_fit_parsnip() %>%
   vip(num_features = 15, geom = "point")
 ```
+
+Wie schon in der EDA vermutet, nehmen Schimpfwörter einen sehr prominenten Wert in der Vorhersage ein. Zusammen mit den beiden Sentiment-Lexika und dem tf_idf-Wert für "white" führt es die Liste an.
 
 ### Predict aufs eigene Test-Sample
 
@@ -603,8 +617,21 @@ pred_test <-
   bind_cols(test_hate)
 ```
 
+```{r}
+pred_test1 <-
+  pred_test %>% 
+  mutate(class = as_factor(class),
+         .pred_class = ifelse(.pred_class == "hate speech", 1, 0)) %>% 
+  mutate(class = ifelse(class == "hate speech", 1, 0))
 
+rocobj <- 
+  pred_test1 %>% 
+  roc(class, .pred_class)
 
+ggroc(rocobj, colour = "#0072B2", size = 1.5)
+```
+
+Obwohl unsere Vorhersage eine accuracy von ca. 89% aufweist, liegt die ROC-Kurve für die Vorhersage auf das Test-Sample unter der Zufallslinie. Das bedeutet, dass unser Klassifikator schlechter ist, als zufällige Vorhersagen... Schade! Vielleicht ist es besser mit einem Transformer-Modell ;)
 
 ## Transformer-Modell
 
