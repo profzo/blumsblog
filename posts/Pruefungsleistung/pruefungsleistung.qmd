@@ -631,7 +631,7 @@ rocobj <-
 ggroc(rocobj, colour = "#0072B2", size = 1.5)
 ```
 
-Obwohl unsere Vorhersage eine accuracy von ca. 89% aufweist, liegt die ROC-Kurve für die Vorhersage auf das Test-Sample unter der Zufallslinie. Das bedeutet, dass unser Klassifikator schlechter ist, als zufällige Vorhersagen... Schade! Vielleicht ist es besser mit einem Transformer-Modell ;)
+Obwohl unsere Vorhersage im Train-Sample eine accuracy von ca. 89% aufweist, liegt die ROC-Kurve für die Vorhersage auf das Test-Sample unter der Zufallslinie. Das bedeutet, dass unser Klassifikator schlechter ist, als zufällige Vorhersagen... Schade! Vielleicht ist es besser mit einem Transformer-Modell ;)
 
 ## Transformer-Modell
 
@@ -668,62 +668,50 @@ Ich habe mich hier für das Modell entschieden, das im Bezug auf Hate-Speech-Det
 #classifier = pipeline("text-classification", model="facebook/roberta-hate-speech-dynabench-r4-target")
 ```
 
+```{python}
+result = classifier(hate_py)
+```
+
+### Ergebnisse in R übertragen
+
+...um die Ergebnisse der Vorhersage des Transformer-Modells vergleichen zu können.
+
+```{r}
+r_results <- py$result
+head(r_results)
+```
+
+```{r}
+
+```
+
 
 reticulate::py_available()
 
 reticulate::py_config()
 
-## Neuronales Netz
-
-import keras
-import os
-import numpy as np
-import pandas as pd
-
-import tensorflow as tf
-from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import Dense
-from sklearn.metrics import accuracy_score
-
-X_train = train_hate["tweet"].values
-X_test = test_hate["tweet"].values
-
-train_hate["y"] = train_hate["class"].map({"OTHER" : 0, "HATE SPEECH" : 1})
-y_train = train_hate.loc[:, "y"].values
-
-test_hate["y"] = test_hate["class"].map({"OTHER" : 0, "HATE SPEECH" : 1})
-y_test = test_hate.loc[:, "y"].values
-
-### Embedding
-
-embedding = "https://tfhub.dev/google/nnlm-en-dim50/2"
-hub_layer = hub.KerasLayer(embedding, input_shape=[], 
-                           dtype=tf.string, trainable=True)
-                           
-### Modell mit zwei Hidden Layers
-
-model = tf.keras.Sequential()
-model.add(hub_layer)
-model.add(Dense(32, input_dim=X_train.shape[1], activation='relu'))
-model.add(tf.keras.layers.Dense(16, activation='relu'))
-model.add(tf.keras.layers.Dense(1))
-
-
-model.compile(optimizer='adam',
-              loss=tf.keras.losses.BinaryCrossentropy(from_logits=True),
-              metrics=['accuracy'])
-
-### Fit
-
-model.fit(X_train, y_train, epochs=10, batch_size=16, validation_data=(X_test, y_test))
-
-### Predict
-
-y_pred = (model.predict(X_test) > 0.5).astype("int32")
-accuracy = accuracy_score(y_test, y_pred)
-print(f"Test Accuracy: {accuracy}")
 
 
 ## Fazit
 
+Die Klassifikation von Hate Speech in sozialen Netzwerken bleibt ein Buch mit vielen Siegeln. Eine nahezu perfekte Vorhersage, wird es wahrscheinlich in naher Zukunft nicht geben. Dafür gibt es zu viele Limitationen des Algorithmus. Nicht ohne Grund beschweren sich v.a. viele Comedians/ Internet-Clowns, dass ihre Accounts aufgrund von angeblicher Hassrede/ Hetze gesperrt werden, obwohl sie sich satirisch/ ironisch äußern. Auch die in diesem Blog schon mehrfach erwähnten Codewörter für Beleidigungen/ rassistische Bezeichnugnen werden nicht weniger. Das kann man am Beispiel von Chinas Staatsoberhaupt Xi veranschaulichen. 
+
+*"According to the censorship log leaked by the social media app Xiaohongshu in 2020, 564 words were considered “sensitive” by the Chinese government when referring to Xi."* Xiao H., 2023 (https://wagingnonviolence.org/2023/04/how-subvversive-nicknames-for-china-present-xi-jinping-fuel-dissent/; abgerufen am 09.02.24)
+
+... und es werden nicht weniger!
+Dennoch stellt dieser Blog einige Ansatzpunkte dar, die zumindest ein paar der Siegel öffnen können. 
+Alles darüber hinaus wird die Zukunft bringen!
+
+
+## Quellen & weitere Informationen
+
+Dieser Blogbeitrag orientiert sich an den Kursinhalten des Schwerpunktmoduls "Data Science 2" im Studiengang "Angewandte Wirtschafts- & Medienpsychologie", betreut von Prof. Dr. habil. Sebastian Sauer.
+
+Sebastian Sauer. (2023). sebastiansauer/datascience-text: v0.1.0 (Version draft1). Zenodo. https://doi.org/10.5281/zenodo.8279822.
+
+#### R-Session 
+
+```{r}
+sessionInfo()
+```
 
