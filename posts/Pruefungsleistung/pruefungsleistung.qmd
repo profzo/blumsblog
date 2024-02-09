@@ -5,11 +5,13 @@ date: "2024-01-31"
 categories: [code, text analysis, hate speech]
 image: "hatespeech.jpg"
 output: html_document
+execute:
+  cache: true
 ---
 
 # X-trem - Hate Speech Vorhersage auf Twitter
 
-X, vormals Twitter, ist schon lange als Hexenkessel bzw. Sammelbecken für Internet-Trolle bekannt. Nirgendwo sonst im Internet wird so prominent polarisiert, getrollt oder beleidigt. Unter anderem deshalb bietet sich die Plattform an, um die Beiträge dr Mitglieder zu analysieren und Hassrede zu identifizieren. In diesem Beitrag soll eine Auswahl solcher Tweets genauer untersucht werden. Zuerst wird der Datensatz pr Explorative Datenanalyse dargestellt. Danach werden mehrere Klassifikationen nach Hate Speech vorgenommen mittels verschiedener Methoden des Text-Minings.
+X, vormals Twitter, ist schon lange als Hexenkessel bzw. Sammelbecken für Internet-Trolle bekannt. Nirgendwo sonst im Internet wird so prominent polarisiert, getrollt oder beleidigt. Unter anderem deshalb bietet sich die Plattform an, die Beiträge der Mitglieder zu analysieren und Hassrede zu identifizieren. In diesem Beitrag soll eine Auswahl solcher Tweets genauer untersucht werden. Zuerst wird der Datensatz in einer explorativen Datenanalyse erkundet. Danach werden mittels einem Machine Learning-Modell und einem Transformer-Modell mehrere Klassifikationen nach Hate Speech vorgenommen.
 Viel Vergnügen!
 
 ### Verwendete Pakete
@@ -59,7 +61,7 @@ glimpse(d_hate)
 
 ## EDA - Explorative Datenanalyse
 
-Der Datensatz besteht aus 5593 Tweets, wovon kanpp 26% als Hate Speech klassifiziert wurden.
+Der Datensatz besteht aus 5593 Tweets, wovon knapp 26% als Hate Speech klassifiziert wurden.
 
 ```{r}
 ggplot(d_hate, aes(x = "", y = "", fill = class)) +
@@ -73,14 +75,15 @@ Wir können schon beim ersten Überfliegen des Datensatzes sehen, dass uns harte
 Trans- & Homofeindlichkeit, Rassismus, Misogynie...
 
 "Why people think gay marriage is okay is beyond me.[...]" id 598
+
 "Those n*****s disgust me. They should have dealt with 100 years ago, we wouldn't be having these problems now." id 2483
 
 Aber dazu später mehr. Zuerst ein paar Grundlagen:
-Auch fällt auf, dass viele Usernames und URL's inbegriffen sind. Diese sind vielleicht nicht relevant für unsere Analyse und sollten später evtl. aussortiert werden (starts_with("http", "@"))
+Auch fällt auf, dass viele Usernames und URL's inbegriffen sind. Diese sind vielleicht nicht relevant für unsere Analyse und sollten später aussortiert werden.
 
 #### Tokenisierung
 
-Um einzelne Wörter graphisch darstellbar zu machen, zerlegen wir die Tweets in ihre einzelnen Strings, also Wörter. Da sich die Funktion unnest_tokens() hier allerdings nicht so gut anstellt, benötigen wir einen eigenen Tokenizer. Dieser ist so angepasst, dass Usernamen und Links in den Tweets nicht aufgenommen werden.
+Um einzelne Wörter graphisch darstellbar zu machen, zerlegen wir die Tweets in ihre einzelnen Strings, also Wörter. Da sich die Funktion unnest_tokens() hier allerdings nicht so gut eignet, benötigen wir einen eigenen Tokenizer. Dieser ist so angepasst, dass Usernamen und Links in den Tweets nicht aufgenommen werden.
 
 ```{r}
 txt <- "@BabyAnimalPics: baby monkey bathtime http://t.co/7KPWAdLF0R Awwwwe! This is soooo ADORABLE!"
@@ -89,7 +92,7 @@ str_split(txt, "[:space:]+") %>%
     map(~ str_remove_all(.x, "@[^ ]+|https?[:graph:]+|^[:punct:]+|[:punct:]+"))
 ```
 
-Dazu müssen noch alle möglichen Zahlen entfernt werden wie z.B. Unicodes von auf Twitter genutzten Emojis oder Geldbeträge. 
+Dazu müssen noch alle möglichen Zahlen entfernt werden wie z.B. Unicodes der auf Twitter genutzten Emojis oder Geldbeträge. 
 Alles zu einer Funktion kombiniert, könnte wie folgt aussehen:
 
 ```{r}
@@ -121,7 +124,7 @@ Schon besser!
 #### Stopwords
 
 Es befinden sich noch einige Strings in der Liste, die keine (analysierbaren) Wörter darstellen. Da hilft nur eines:
-Stopwörter entfernen! Hierzu kombiniere ich einige gängige Listen und ergänze sie mit einer eigenen, auf den Datensatz zugeschnittene Liste (z.B. "rt" ist die Abkürzung von "retweet", "yall" als umgangssprachliche Form von "you all"). 
+Stopwörter entfernen! Hierzu kombiniere ich einige gängige Listen und ergänze sie mit einer eigenen, auf den Datensatz zugeschnittenen Liste (z.B. "rt" als Abkürzung von "retweet", "yall" als umgangssprachliche Form von "you all"). 
 
 ```{r}
 sw_snowball <- get_stopwords(source = "snowball")
@@ -140,7 +143,7 @@ head(d_hate_tok_wstop)
 
 #### Worthäufigkeiten
 
-Nun, da die Tweets in ihre einzelnen Wörter aufgeteilt und bereinigt sind, können wir wunderbar visualisieren was der Datensatz bereithält.
+Nun, da die Tweets in ihre einzelnen Wörter aufgeteilt und bereinigt sind, können wir wunderbar visualisieren, was der Datensatz bereithält.
 
 Welche Wörter kommen am häufigsten vor?
 
@@ -169,11 +172,12 @@ d_hate_tok_wstop %>%
 ```
 
 *"Man sieht: Es sind Schimpfwörter im Haus!"*
-Das könnte für die weitere Analyse/ Klassifikation interessantwerden, ebenso wie mögliche Codewörter wie "brownie" (Personen mit dunkler Hautfarbe) oder "birds" (Frauen).
+
+Das könnte für die weitere Analyse/ Klassifikation interessant werden, ebenso wie mögliche Codewörter wie "brownie" (Personen mit dunkler Hautfarbe) oder "birds" (Frauen).
 
 #### Sentimentanalyse
 
-Die Sentimentanalyse erkennt und bewertet den überwiegende "Ton" oder die "Stimmung" eines Textes. Dieser Prozess kann auf einzelne Sätze, Absätze oder sogar auf gesamte Dokumente angewendet werden. Wir konzentrieren uns hier einmal auf einzelne Wörter mithilfe des Lexikons afinn und einmal auf die Bewertung im Kontext eines ganzen Satzes mit dem Paket sentimentr.
+Die Sentimentanalyse erkennt und bewertet den überwiegenden "Ton" oder die "Stimmung" eines Textes. Dieser Prozess kann auf einzelne Sätze, Absätze oder sogar auf gesamte Dokumente angewendet werden. Wir konzentrieren uns hier zum einen auf einzelne Wörter mithilfe des Lexikons afinn und zum anderen auf die Bewertung im Kontext eines ganzen Satzes mit dem Paket sentimentr.
 
 Mit afinn:
 ```{r}
@@ -222,7 +226,7 @@ hate_sentir %>%
   theme_minimal()
 ```
 
-Im Vergleich zur Sentimenteinteilung von afinn sieht man hier eine ganz klare Spitze beim Wert der neutralen Bestandteile. Das liegt vor allem an der ungenauen Eintilung vom Befehl get_sentences(), der etliche Nicht-Sätze erstellt, die als neutral gewertet werden. Das könnte aber auch an der unterschiedlichen Herangehensweise, das Sentiment über die einzelnen Wörter bzw. im Kontext des gesamten Satzes zu ermitteln. Einzelne Wörter sind einfacher zu erkennen und eindeutiger zu bewerten.
+Im Vergleich zur Sentimenteinteilung von afinn sieht man hier eine ganz klare Spitze beim Wert der neutralen Bestandteile. Das liegt vor allem an der ungenauen Einteilung vom Befehl get_sentences(), der etliche Nicht-Sätze erstellt, die als neutral gewertet werden. Das könnte aber auch an der unterschiedlichen Herangehensweise liegen, den Sentiment_Wert über die einzelnen Wörter bzw. im Kontext des gesamten Satzes zu ermitteln. Einzelne Wörter sind einfacher zu erkennen und eindeutiger zu bewerten.
 
 Mit sentimentr kann man zusätzlich noch die Emotionen und Schimpfwörter analysieren.
 
@@ -269,7 +273,7 @@ dominant_emo_hate %>%
 ```
 Klappt! 
 
-Zwar muss bei dieser Grafik beachtet werden, dass der Anteil von other generell sehr viel größer ist, als der von hate speech und dementsprechend heller ist. Trotzdem kann man hier gut erkennen, welche Emotionen in den Tweets mit Hate Speech wohl vorherrscht: Wut, Ekel, Niedergeschlagenheit
+Zwar muss bei dieser Grafik beachtet werden, dass der Anteil von other generell sehr viel größer ist, als der von hate speech und dementsprechend heller ist. Trotzdem kann man hier gut erkennen, welche Emotionen in den Tweets mit Hate Speech wohl vorherrscht: Wut, Ekel und Niedergeschlagenheit
 
 Nun zu den Schimpfwörtern:
 
@@ -386,6 +390,8 @@ hate_word_vectors %>%
 
 Die Worte mit dem höchsten Wert lassen sich plausibel erklären und scheinen nicht sehr viel mit einem möglichen frauenverachtenden Codewort zu tun zu haben.(play, Flappy Birds, Angry Birds, games)
 
+Für Brownie:
+
 ```{r}
 hate_word_vectors %>% 
   nearest_neighbors("brownie") %>% 
@@ -399,14 +405,14 @@ hate_word_vectors %>%
 
 Hier beziehen sich die meisten Wörter auch auf das Gebäck, statt auf Menschen Bezug zu nehmen.
 
-Um nochmal sicher zu gehen, ob dieses Vorgehen auch verlässlich ist, probieren wir es mit einem offensichtlichen Begriff
+Um nochmal sicher zu gehen, ob dieses Vorgehen auch verlässlich ist, probieren wir es mit einem offensichtlichen Begriff:
 
 ```{r}
 hate_word_vectors %>% 
   nearest_neighbors("nigga")
 ```
-Definitiv im Kontext negativerer Wörter!
 
+Definitiv im Kontext negativerer Wörter!
 
 Um diese Embeddings für das spätere Modell zugänglich zu machen folgen noch ein paar Schritte.
 
@@ -477,7 +483,7 @@ ggraph(bigram_graph, layout = "fr") +
         theme_void()
 ```
 
-Das mit Abstand am häufigsten vorkommende Bigramm ist "white trash", dicht gefolgt von "flappy bird". Anscheinend mussten viele ihren Frust an der digitalen Tastatur auslassen, nachdem sie das Spiel gespielt haben... Rassistsche und beleidigende Äußerungen wie "uncle tom" und "fucking faggot" sind ebenfalls vertreten, sowie das Stadion der New York Yankees und deren erfolgreicher Spieler Derek Jeter.
+Das mit Abstand am häufigsten vorkommende Bigramm ist "white trash", dicht gefolgt von "flappy bird". Anscheinend mussten viele Leute ihren Frust an der digitalen Tastatur auslassen, nachdem sie das Spiel gespielt haben... Rassistsche und beleidigende Äußerungen wie "uncle tom" und "fucking faggot" sind ebenfalls vertreten, sowie das Stadion der New York Yankees und deren erfolgreicher Spieler Derek Jeter.
 
 ## Modellierung
 
@@ -537,7 +543,7 @@ rec1 <-
   step_normalize(all_numeric_predictors())
 ```
 
-baked <- bake(prep(rec1), new_data = NULL)
+(optional: baked <- bake(prep(rec1), new_data = NULL))
 
 ### Modell & Workflow
 
@@ -597,7 +603,7 @@ metrics %>%
   head()
 ```
 
--> Preprocessor1_Model5 schneidet am besten ab.
+-> Preprocessor1_Model4 schneidet am besten ab.
 
 
 ### Das beste Modell auswählen & Fitten
@@ -640,7 +646,7 @@ rocobj <-
 ggroc(rocobj, colour = "#0072B2", size = 1.5)
 ```
 
-Obwohl unsere Vorhersage im Train-Sample eine accuracy von ca. 89% aufweist, liegt die ROC-Kurve für die Vorhersage auf das Test-Sample unter der Zufallslinie. Das bedeutet, dass unser Klassifikator schlechter ist, als zufällige Vorhersagen... Schade! Vielleicht ist es besser mit einem Transformer-Modell ;)
+Obwohl unsere Vorhersage im Train-Sample eine accuracy von ca. 89% aufweist, liegt die ROC-Kurve für die Vorhersage auf das Test-Sample unter der Zufallslinie. Das bedeutet, dass unser Klassifikator schlechter ist, als zufällige Vorhersagen... Schade! Vielleicht ist es besser mit einem Transformer-Modell. ;)
 
 ## Transformer-Modell
 
